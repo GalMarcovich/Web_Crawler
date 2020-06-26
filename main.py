@@ -1,43 +1,45 @@
 import requests
 from bs4 import BeautifulSoup
 import sys
+from pymongo import MongoClient
 
-# page = requests.get('https://forecast.weather.gov/MapClick.php?lat=39.602&lon=-84.7436#.XuM-qcYzY5k')
-# soup = BeautifulSoup(page.content, 'html.parser')
-# #print(soup.find_all('a'))
-# week = soup.find(id='seven-day-forecast-body')
-# #print(week)
-# items = week.find_all(class_='tombstone-container')
-# #print(items[0])
-# '''
-# print(items[0].find(class_='period-name').get_text())
-# print(items[0].find(class_='short-desc').get_text())
-# print(items[0].find(class_='temp').get_text())
-# '''
-# period_names = [item.find(class_='period-name').get_text() for item in items]
-# short_desc = [item.find(class_='short-desc').get_text() for item in items]
-# temp = [item.find(class_='temp').get_text() for item in items]
-# '''
-# print(period_names)
-# print(short_desc)
-# print(temp)
-# '''
-#
-# weather_stuff = pd.DataFrame(
-#     {
-#         'period': period_names,
-#         'short_desc':short_desc,
-#         'temp':temp,
-# })
-
-# print(weather_stuff)
-# weather_stuff.to_csv('result.csv')
-
-###############################################################################
+url_MongoClient = "mongodb+srv://gal:dovi140198@cluster0-tb3jj.mongodb.net/<dbname>?retryWrites=true&w=majority"
+title_class = "field-item even"
+brand_class = "field field-name-field-brand field-type-taxonomy-term-reference field-label-inline clearfix"
+rockchip_chipset_class = "field field-name-field-chipset field-type-taxonomy-term-reference field-label-inline clearfix"
 
 
-def page_metadata(start_url):
-    return
+# check if the name exist already, if it does we update the values if necessary and if it is new we add it to the DB
+def page_metadata(html):
+    cluster = MongoClient(url_MongoClient)
+    db = cluster["app"]
+    collection = db["details"]
+    # if the name is None return
+    if html.find(class_=title_class) is None:
+        return
+    title = html.find(class_=title_class).get_text()
+
+    if html.find(class_=brand_class) is None or html.find(class_=brand_class).find('a') is None:
+        brand = ""
+    else:
+        brand = html.find(class_=brand_class).find('a').get_text()
+
+    if html.find(class_=rockchip_chipset_class) is None or html.find(class_=rockchip_chipset_class).find('a') is None:
+        rockchip_chipset = ""
+    else:
+        rockchip_chipset = html.find(class_=rockchip_chipset_class).find('a').get_text()
+
+    result = collection.find_one({"_id": title})
+    # new
+    if result is None:
+        post = {"_id": title, "Brand": brand, "Rockchip Chipset": rockchip_chipset}
+        collection.insert_one(post)
+    else:
+        # check if we need to update
+        if brand not in result:
+            collection.update_one({"_id": title}, {"$set": {"Brand": brand}})
+        elif rockchip_chipset not in result:
+            collection.update_one({"_id": title}, {"$set": {"Rockchip Chipset": rockchip_chipset}})
 
 
 # crawl to the home page and get the path of the second page
@@ -49,7 +51,6 @@ def first_page(start_url):
         if link_name in link['href']:
             full_path = start_url + link['href']
             return full_path
-    return None
 
 
 # get the page of every firmware
@@ -68,8 +69,9 @@ def get_firmware_links(second_page_path, start_url):
 # download the zip
 def zip_firmware(path):
     zip_url = ""
-    page_frimware = requests.get(path)
-    soup3 = BeautifulSoup(page_frimware.content, 'html.parser')
+    page_firmware = requests.get(path)
+    soup3 = BeautifulSoup(page_firmware.content, 'html.parser')
+    page_metadata(soup3)
     for url in soup3.find_all('a', href=True):
         if '.zip' in url['href']:
             zip_url = url['href']
@@ -81,23 +83,47 @@ def zip_firmware(path):
         code.write(r.content)
 
 
+# get the next url
+def get_all_pages(page):
+    url = 'https://www.rockchipfirmware.com/'
+    page_html = requests.get(page[0])
+    soup4 = BeautifulSoup(page_html.content, 'html.parser')
+    if soup4.find(class_="pager-next last").find('a') is None:
+        return None
+    for detail in soup4.find(class_="pager-next last"):
+        return url + detail['href']
+
+
+# collect all the pages
+def get_pages_list(page):
+    pages = []
+    pages += page
+    while True:
+        url = get_all_pages(page)
+        if url is None:
+            break
+        pages.append(url)
+        page = [url]
+    return pages
+
+
 # the crawling function
 def crawl(start_url):
+    links = []
     second_page_path = first_page(start_url)
-    links_list = get_firmware_links(second_page_path, start_url)
-    # r = [zip_firmware(zip_path) for zip_path in links_list]
-    # for zip_path in links_list:
-    #     zip_firmware(zip_path)
-    for i in range(3):
-        zip_firmware(links_list[i])
-        break
+    all_pages = get_pages_list([second_page_path])
+    for page in all_pages:
+        links += get_firmware_links(page, start_url)
+    # [zip_firmware(zip_path) for zip_path in links]
+    for i in range(1):
+        zip_firmware(links[i])
 
-##############################nextpage
+
+# main function
 def main(start_url):
     crawl(start_url)
 
 
-# main function
 if __name__ == "__main__":
     #url = 'https://www.rockchipfirmware.com/'
     main(sys.argv[1])
