@@ -114,8 +114,8 @@ def crawl(start_url):
     all_pages = get_pages_list([second_page_path])
     for page in all_pages:
         links += get_firmware_links(page, start_url)
-    # [zip_firmware(zip_path) for zip_path in links]
-    for i in range(1):
+    #[zip_firmware(zip_path) for zip_path in links]
+    for i in range(3):
         zip_firmware(links[i])
 
 
